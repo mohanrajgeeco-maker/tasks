@@ -9247,60 +9247,61 @@ function gsUpdateLastSync(){
 
 async function gsTestConnection(){
   var cfg = gsGetConfig();
-  if(!cfg.url){ gsShowStatus('\u274c No Apps Script URL configured.','error'); return; }
-  if(!cfg.key){ gsShowStatus('\u274c No secret key set.','error'); return; }
-  gsShowStatus('\uD83D\uDD0C Testing connection...','loading');
+  if(!cfg.url){ gsShowStatus('❌ No Apps Script URL. Configure below.','error'); return; }
+  if(!cfg.key){ gsShowStatus('❌ No secret key set.','error'); return; }
+  gsShowStatus('Testing connection...','loading');
   try{
-    var resp = await fetch(cfg.url, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({action:'ping', key:cfg.key})
-    });
-    var data = await resp.json();
+    var url = cfg.url + '?action=ping&key=' + encodeURIComponent(cfg.key);
+    var resp = await fetch(url);
+    var text = await resp.text();
+    var data = JSON.parse(text);
     if(data.status==='ok'){
-      gsShowStatus('\u2705 Connected! Sheet is reachable and secret key matched.','success');
-      showToast('Google Sheets connected \u2705','success');
+      gsShowStatus('✅ Connected! Sheet is reachable and secret key matched.','success');
+      showToast('Google Sheets connected ✅','success');
     } else {
-      gsShowStatus('\u274c Failed: '+(data.message||'Unknown error'),'error');
+      gsShowStatus('❌ Connected but wrong key: '+(data.message||'Check secret key'),'error');
     }
   } catch(e){
-    gsShowStatus('\u274c Network error: '+e.message,'error');
+    gsShowStatus('❌ Network error: '+e.message,'error');
   }
 }
 
 async function gsPushToSheets(){
   var cfg = gsGetConfig();
-  if(!cfg.url){ gsShowStatus('\u274c No Apps Script URL. Configure in Settings first.','error'); showToast('Configure Google Sheets first','error'); return; }
-  if(!cfg.key){ gsShowStatus('\u274c No secret key set.','error'); return; }
-  gsShowStatus('\u2b06 Pushing data to Google Sheets...','loading');
+  if(!cfg.url){ gsShowStatus('❌ No Apps Script URL. Configure in Settings.','error'); showToast('Configure Google Sheets first','error'); return; }
+  if(!cfg.key){ gsShowStatus('❌ No secret key set.','error'); return; }
+  gsShowStatus('Pushing data to Google Sheets...','loading');
   gsShowSyncBadge('syncing');
   try{
     var payload = {
-      action:'push', key:cfg.key,
-      data:{
-        tasks:tasks, team:team, clients:clients, invoices:invoices,
-        taskTemplates:taskTemplates||[], advTemplates:advTemplates||[],
-        activityLog:(activityLog||[]).slice(-200),
-        pushedAt:new Date().toISOString()
-      }
+      tasks:tasks, team:team, clients:clients, invoices:invoices,
+      taskTemplates:taskTemplates||[], advTemplates:advTemplates||[],
+      activityLog:(activityLog||[]).slice(-100),
+      pushedAt:new Date().toISOString()
     };
+    var jsonStr = JSON.stringify(payload);
+    // Use POST with no-cors won't work, use fetch with mode cors properly
+    // Apps Script handles POST with JSON body when deployed as Anyone
     var resp = await fetch(cfg.url, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify(payload)
+      method:'POST',
+      headers:{'Content-Type':'text/plain'},
+      body: JSON.stringify({action:'push', key:cfg.key, data:payload})
     });
-    var data = await resp.json();
+    var text = await resp.text();
+    var data = JSON.parse(text);
     if(data.status==='ok'){
       gsUpdateLastSync();
-      gsShowStatus('\u2705 Pushed! '+tasks.length+' tasks, '+clients.length+' clients saved to Google Sheets.','success');
-      showToast('Synced to Google Sheets \u2705','success');
+      gsShowStatus('✅ Pushed! '+tasks.length+' tasks saved to Google Sheets.','success');
+      showToast('Synced to Google Sheets ✅','success');
       gsShowSyncBadge('ok');
-      addLog('GoogleSheets','Push \u2014 '+tasks.length+' tasks synced');
+      addLog('GoogleSheets','Push — '+tasks.length+' tasks synced');
     } else {
-      gsShowStatus('\u274c Push failed: '+(data.message||'Unknown error'),'error');
+      gsShowStatus('❌ Push failed: '+(data.message||'Unknown error'),'error');
       showToast('Sync failed','error');
       gsShowSyncBadge('error');
     }
   } catch(e){
-    gsShowStatus('\u274c Error: '+e.message,'error');
+    gsShowStatus('❌ Error: '+e.message,'error');
     showToast('Sync error: '+e.message,'error');
     gsShowSyncBadge('error');
   }
@@ -9308,33 +9309,41 @@ async function gsPushToSheets(){
 
 async function gsPullFromSheets(){
   var cfg = gsGetConfig();
-  if(!cfg.url){ gsShowStatus('\u274c No Apps Script URL. Configure in Settings first.','error'); return; }
-  if(!cfg.key){ gsShowStatus('\u274c No secret key set.','error'); return; }
-  if(!confirm('Pull data from Google Sheets?\n\nThis will OVERWRITE your local data.\nMake sure you pushed recently. Continue?')) return;
-  gsShowStatus('\u2b07 Pulling data from Google Sheets...','loading');
+  if(!cfg.url){ gsShowStatus('❌ No Apps Script URL. Configure in Settings.','error'); return; }
+  if(!cfg.key){ gsShowStatus('❌ No secret key set.','error'); return; }
+  if(!confirm('Pull data from Google Sheets?\n\nThis will OVERWRITE your local data. Make sure data was pushed recently. Continue?')) return;
+  gsShowStatus('Pulling data from Google Sheets...','loading');
+  gsShowSyncBadge('syncing');
   try{
-    var resp = await fetch(cfg.url+'?action=pull&key='+encodeURIComponent(cfg.key));
-    var data = await resp.json();
+    var url = cfg.url + '?action=pull&key=' + encodeURIComponent(cfg.key);
+    var resp = await fetch(url);
+    var text = await resp.text();
+    var data = JSON.parse(text);
     if(data.status==='ok' && data.data){
       var d = data.data;
-      if(d.tasks)         { tasks=d.tasks;     localStorage.setItem('eu_tasks',JSON.stringify(tasks)); }
-      if(d.team)          { team=d.team;        localStorage.setItem('eu_team',JSON.stringify(team)); }
-      if(d.clients)       { clients=d.clients;  localStorage.setItem('eu_clients',JSON.stringify(clients)); }
-      if(d.invoices)      { invoices=d.invoices; saveInvoices(); }
-      if(d.taskTemplates) { taskTemplates=d.taskTemplates; saveTemplates(); }
-      if(d.advTemplates)  { advTemplates=d.advTemplates;  saveAdvTemplates(); }
+      if(d.tasks)   { tasks=d.tasks;    localStorage.setItem('eu_tasks',   JSON.stringify(tasks)); }
+      if(d.team)    { team=d.team;      localStorage.setItem('eu_team',    JSON.stringify(team)); }
+      if(d.clients) { clients=d.clients;localStorage.setItem('eu_clients', JSON.stringify(clients)); }
+      if(d.invoices){ invoices=d.invoices; saveInvoices(); }
+      if(d.taskTemplates){ taskTemplates=d.taskTemplates; saveTemplates(); }
+      if(d.advTemplates) { advTemplates=d.advTemplates;  saveAdvTemplates(); }
       nextTaskId   = tasks.length   ? Math.max(...tasks.map(function(t){return t.id;}))+1   : 300;
       nextClientId = clients.length ? Math.max(...clients.map(function(c){return c.id;}))+1 : 20;
       nextMemberId = team.length    ? Math.max(...team.map(function(m){return m.id;}))+1    : 10;
       populateSelects(); renderCurrentPage();
       gsUpdateLastSync();
-      gsShowStatus('\u2705 Pulled! '+(d.tasks||[]).length+' tasks loaded from Google Sheets.','success');
-      showToast('Data pulled from Google Sheets \u2705','success');
-      addLog('GoogleSheets','Pull \u2014 '+(d.tasks||[]).length+' tasks restored');
+      gsShowStatus('✅ Pulled! '+(d.tasks||[]).length+' tasks loaded.','success');
+      showToast('Data pulled from Google Sheets ✅','success');
+      gsShowSyncBadge('ok');
+      addLog('GoogleSheets','Pull — '+(d.tasks||[]).length+' tasks restored');
     } else {
-      gsShowStatus('\u274c Pull failed: '+(data.message||'No data found'),'error');
+      gsShowStatus('❌ Pull failed: '+(data.message||'No data found'),'error');
+      gsShowSyncBadge('error');
     }
-  } catch(e){ gsShowStatus('\u274c Error: '+e.message,'error'); }
+  } catch(e){
+    gsShowStatus('❌ Error: '+e.message,'error');
+    gsShowSyncBadge('error');
+  }
 }
 
 function gsTriggerAutoSync(){
